@@ -1,0 +1,18 @@
+[Unit]
+Description=Consus Edge Provisioning (one-shot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/edge-boot/boot-min.sh
+RemainAfterExit=yes
+TimeoutStartSec=600
+StandardOutput=journal
+StandardError=journal
+Environment=ENV_FILE=/opt/edge-boot/env.edge
+Environment=SA_JSON=/opt/edge-boot/secrets/key.json
+Environment=RUN_CONTAINER=0
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,36 @@
+# === Consus Edge Provisioning ===
+
+# Environment & keys
+env/env.edge.*        # all per-site configs
+!env/env.edge.template
+keys/                 # never commit credentials
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*.bak
+*.tmp
+*.log
+
+# Python / shell cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Backup / local temp files
+*.old
+*.orig
+*.save
+*.retry
+
+# Docker / deployment leftovers
+*.tar
+*.gz
+*.zip
+
+# VSCode / IDE configs
+.vscode/
+.idea/
+*.code-workspace
