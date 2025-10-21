@@ -27,7 +27,7 @@ BOOT_SH="${REPO_ROOT}/scripts/boot-min.sh"
 EDGE_START_SH="${REPO_ROOT}/scripts/edge-start.sh"
 VERIFY_SH="${REPO_ROOT}/scripts/verify.sh"
 UNIT_FILE="${REPO_ROOT}/systemd/edge-boot.service"
-REGMAP="${REPO_ROOT}/register_map.example.json"   # replace if you have a site-specific map
+REGMAP="${REPO_ROOT}/env/register_map.json"   # replace if you have a site-specific map
 
 REMOTE_BOOT_DIR="/opt/edge-boot"
 REMOTE_ENV="${REMOTE_BOOT_DIR}/env.edge"

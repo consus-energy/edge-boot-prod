@@ -14,6 +14,9 @@ if ! groups "$USER" | grep -q '\bdocker\b' 2>/dev/null; then DOCKER="sudo docker
 [ -f "$ENV_FILE" ] || err "Missing $ENV_FILE"
 set -a; . "$ENV_FILE"; set +a
 
+# --- Modbus port is ALWAYS 502 (force it, regardless of env) ---
+MODBUS_PORT=502
+
 # ---------- Host prep ----------
 sudo mkdir -p /opt/edge-boot/data/spool /opt/edge-boot/secrets
 sudo chown -R "$USER":"$USER" /opt/edge-boot || true
@@ -57,69 +60,80 @@ if [[ "${WIFI_PROVISION_ENABLE:-0}" == "1" ]]; then
   fi
 fi
 
-# ---------- Inverter link (eth0) ----------
+# ---------- Inverter link (eth0 / or wlan if LINK_INVERTER=wifi) ----------
 discover_modbus_ip(){
+  local port="502"  # fixed
+  local link="${LINK_INVERTER:-ethernet}"
+  local iface
   local ip=""
-  local port="${MODBUS_PORT:-502}"
-  local iface="${ETH_IFACE:-eth0}"
+  local cidr=""
   local fallback_pi_ip="${EDGE_ETH_STATIC_IP:-192.168.86.10}"
   local fallback_prefix="${EDGE_ETH_PREFIX:-24}"
 
-  # 0) If env already has a value, try it first
+  # Prefer env value if already reachable
   if [[ -n "${MODBUS_IP:-}" ]]; then
     if nc -z -w1 "$MODBUS_IP" "$port" >/dev/null 2>&1; then echo "$MODBUS_IP"; return 0; fi
   fi
 
-  # 1) If inverter link is ethernet, ensure iface is up
-  if [[ "${LINK_INVERTER:-ethernet}" == "ethernet" ]]; then
-    command -v nmcli >/dev/null 2>&1 && nmcli dev set "$iface" managed yes || true
-    # try DHCP for a few seconds
-    command -v nmcli >/dev/null 2>&1 && nmcli con show consus-eth0 >/dev/null 2>&1 || \
-      nmcli con add type ethernet ifname "$iface" con-name consus-eth0 || true
-    command -v nmcli >/dev/null 2>&1 && nmcli con mod consus-eth0 ipv4.method auto ipv6.method ignore || true
-    command -v nmcli >/dev/null 2>&1 && nmcli con up consus-eth0 || true
+  # Pick interface by link type
+  if [[ "$link" == "wifi" ]]; then
+    iface="${WIFI_IFACE:-wlan0}"
+  else
+    iface="${ETH_IFACE:-eth0}"
+  fi
+
+  # Ensure iface up / address present
+  if [[ "$link" == "ethernet" ]]; then
+    if command -v nmcli >/dev/null 2>&1; then
+      nmcli dev set "$iface" managed yes || true
+      nmcli -t -f NAME connection show | grep -Fxq consus-eth0 || \
+        nmcli connection add type ethernet ifname "$iface" con-name consus-eth0 || true
+      nmcli connection modify consus-eth0 ipv4.method auto ipv6.method ignore || true
+      nmcli connection up consus-eth0 || true
+    fi
     sleep 5
-
-    # Determine subnet
-    local cidr
-    cidr=$(ip -4 addr show dev "$iface" | awk '/inet /{print $2; exit}')
+    cidr="$(ip -4 addr show dev "$iface" | awk '/inet /{print $2; exit}')"
     if [[ -z "$cidr" ]]; then
-      # 2) No DHCP lease → apply static fallback (no gateway)
       note "No DHCP on ${iface}; applying static ${fallback_pi_ip}/${fallback_prefix}"
-      command -v nmcli >/dev/null 2>&1 && nmcli con mod consus-eth0 ipv4.method manual ipv4.addresses "${fallback_pi_ip}/${fallback_prefix}" ipv4.gateway "" ipv4.dns "" || true
-      command -v nmcli >/dev/null 2>&1 && nmcli con up consus-eth0 || true
-      cidr="${fallback_pi_ip}/${fallback_prefix}"
+      if command -v nmcli >/dev/null 2>&1; then
+        nmcli connection modify consus-eth0 ipv4.method manual \
+          ipv4.addresses "${fallback_pi_ip}/${fallback_prefix}" ipv4.gateway "" ipv4.dns "" || true
+        nmcli connection up consus-eth0 || true
+      else
+        sudo ip addr add "${fallback_pi_ip}/${fallback_prefix}" dev "$iface" 2>/dev/null || true
+        sudo ip link set "$iface" up 2>/dev/null || true
+      fi
       sleep 2
+      cidr="${fallback_pi_ip}/${fallback_prefix}"
     fi
+  else
+    # wifi link: just read existing cidr
+    cidr="$(ip -4 addr show dev "$iface" | awk '/inet /{print $2; exit}')"
+  fi
 
-    # 3) Scan for Modbus TCP (prefer ARP neighbors, then quick sweep)
-    local subnet base
-    subnet=$(ipcalc -n "$cidr" 2>/dev/null | awk -F= '/Network/{print $2}')
-    base="${subnet%/*}"
-    note "Scanning ${iface} subnet (${cidr}) for Modbus TCP (502)…"
+  # Probe common guesses first
+  for guess in "${MODBUS_IP:-}" "192.168.86.142"; do
+    [[ -n "$guess" ]] || continue
+    if nc -z -w1 "$guess" "$port" >/dev/null 2>&1; then ip="$guess"; break; fi
+  done
 
-    # Probe known common address first (when you use fixed inverter IPs)
-    for guess in "${MODBUS_IP:-}" "192.168.86.142"; do
-      [[ -n "$guess" ]] || continue
-      if nc -z -w1 "$guess" "$port" >/dev/null 2>&1; then ip="$guess"; break; fi
+  # ARP neighbors (fast)
+  if [[ -z "$ip" ]]; then
+    ip neigh show dev "$iface" | awk '{print $1}' | while read -r host; do
+      nc -z -w1 "$host" "$port" >/dev/null 2>&1 && { echo "$host"; break; }
+    done | { read -r found || true; [[ -n "${found:-}" ]] && ip="$found"; }
+  fi
+
+  # Small sweep (first ~50 hosts in subnet)
+  if [[ -z "$ip" && -n "$cidr" ]]; then
+    local base A B C host
+    base="${cidr%/*}"
+    IFS=. read -r A B C _ <<<"$base"
+    for last in $(seq 2 51); do
+      host="${A}.${B}.${C}.${last}"
+      [[ "$host" == "$fallback_pi_ip" ]] && continue
+      nc -z -w1 "$host" "$port" >/dev/null 2>&1 && { ip="$host"; break; }
     done
-
-    # ARP neighbors first (fast)
-    if [[ -z "$ip" ]]; then
-      ip neigh show dev "$iface" | awk '{print $1}' | while read -r host; do
-        nc -z -w1 "$host" "$port" >/dev/null 2>&1 && { echo "$host"; break; }
-      done | { read -r found || true; [[ -n "${found:-}" ]] && ip="$found"; }
-    fi
-
-    # Fallback: small sweep (first 50 hosts to keep it quick)
-    if [[ -z "$ip" && -n "$base" ]]; then
-      IFS=. read -r A B C D <<<"$(echo "$base")"
-      for last in $(seq 2 51); do
-        host="${A}.${B}.${C}.${last}"
-        [[ "$host" == "$fallback_pi_ip" ]] && continue
-        nc -z -w1 "$host" "$port" >/dev/null 2>&1 && { ip="$host"; break; }
-      done
-    fi
   fi
 
   [[ -n "$ip" ]] && echo "$ip"
@@ -127,7 +141,7 @@ discover_modbus_ip(){
 
 found_ip="$(discover_modbus_ip || true)"
 if [[ -n "$found_ip" ]]; then
-  note "Detected inverter Modbus at ${found_ip}:${MODBUS_PORT:-502}"
+  note "Detected inverter Modbus at ${found_ip}:502"
   # Write back atomically to env.edge
   tmp=$(mktemp)
   awk -v kv="MODBUS_IP=${found_ip}" '
@@ -136,6 +150,35 @@ if [[ -n "$found_ip" ]]; then
     {print}
     END{ if(!done) print kv }
   ' "$ENV_FILE" > "$tmp" && sudo install -m 0644 "$tmp" "$ENV_FILE" && rm -f "$tmp"
+
+  # ---------- Report MODBUS target to BatteryRegistry (PATCH /batteries/{consus_id}) ----------
+  # Prefer 'consus_id' from env; fallback to legacy 'group_id' if present
+  TARGET_ID="${consus_id:-${group_id:-}}"
+  if [[ -n "${TARGET_ID}" && -n "${api_base_url:-}" && -n "${API_KEY:-}" ]]; then
+    PATCH_URL="${api_base_url%/}/batteries/${TARGET_ID}"
+
+    read -r -d '' _JSON <<EOF
+{
+  "MODBUS_IP": "${found_ip}",
+  "MODBUS_PORT": 502
+}
+EOF
+
+    note "PATCH ${PATCH_URL} with MODBUS_IP=${found_ip}, MODBUS_PORT=502"
+    code="$(curl -sS -m 10 -o /dev/null -w '%{http_code}' \
+      -X PATCH "${PATCH_URL}" \
+      -H "Authorization: Bearer ${API_KEY}" \
+      -H "Content-Type: application/json" \
+      --data "${_JSON}")" || code="000"
+
+    if [[ "$code" =~ ^(200|201|204)$ ]]; then
+      note "BatteryRegistry updated (${code})."
+    else
+      note "PATCH failed (${code}). Local env updated; backend can be retried later."
+    fi
+  else
+    note "Skipping upstream PATCH (missing consus_id/group_id or api_base_url/API_KEY)."
+  fi
 else
   note "Modbus IP not discovered yet; will rely on future retry/manual set."
 fi
