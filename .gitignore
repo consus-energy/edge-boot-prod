@@ -3,7 +3,8 @@
 # Environment & keys
 env/env.edge.*        # all per-site configs
 !env/env.edge.template
-keys/                 # never commit credentials
+secrets/                 # never commit credentials
+
 
 # OS / editor junk
 .DS_Store
