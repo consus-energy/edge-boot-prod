@@ -1,0 +1,74 @@
+curl -X POST "https://bms-api-1008782913560.europe-west2.run.app/lanzones/" \
+  -H "Authorization: Bearer token1" \
+  -H "Content-Type: application/json" \
+  -d '{
+
+    "lanzone_id": "consus-edge-lanz002-pl19-1",
+    "description": "Martjin",
+
+    #"edge_address": " ",
+
+    "api_base_url": "https://bms-api-1008782913560.europe-west2.run.app",
+
+    "API_KEY": "token1",
+
+    "MQTT_BROKER_HOST": "ibce3b30.ala.eu-central-1.emqxsl.com",
+    "MQTT_BROKER_PORT": 8883,
+    "MQTT_TOPIC": "lanzone/consus-edge-lanz002-pl19-1/updates",
+
+    "MQTT_USER": "edge-PL19-1",
+    "MQTT_PASSWORD": "edge-PL19-1"
+  }'
+
+
+
+
+curl -X POST "https://bms-api-1008782913560.europe-west2.run.app/batteries/" \
+  -H "Authorization: Bearer token1" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "consus_id": "consus-edge-lanz002-pl19-1 ",
+    "plant_id": "PLANT-002",
+
+    "lanzone_id": "consus-edge-lanz002-pl19-1",
+    "capacity": 30.0,
+    "max_discharge_w": 5000,
+    "max_charge_w": 5000,
+    "control_mode": "static",
+
+    "MODBUS_PORT": 502,
+  }'
+
+
+
+
+curl -X POST "https://bms-api-1008782913560.europe-west2.run.app/tasks/tasks" \
+  -H "Authorization: Bearer token1" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "description": "Static Go task for LANZ-002",
+    "task_code": "sta-consus-edge-lanz002-pl19-1-2025-12-05",
+    "assignment_group_id": "consus-edge-lanz002-pl19-1",
+
+    "task_type": "static",
+
+    "charge_windows": [
+      ["00:30:00", "05:29:00"]
+    
+    ],
+
+    "max_import_limit": 5.0,
+    "max_export_limit": 5.0,
+
+ 
+  }'
+
+
+curl -X POST "https://bms-api-1008782913560.europe-west2.run.app/settings/" \
+  -H "Authorization: Bearer token1" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "settings_id": "consus-edge-lanz002-pl19-1",
+    "group_id": "consus-edge-lanz002-pl19-1",
+    "edge_status": "inactive"
+  }'

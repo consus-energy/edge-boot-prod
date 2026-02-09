@@ -10,7 +10,7 @@ RemainAfterExit=yes
 TimeoutStartSec=600
 StandardOutput=journal
 StandardError=journal
-Environment=ENV_FILE=/opt/edge-boot/env.edge
+Environment=ENV_FILE=/opt/edge-boot/env/env.edge
 Environment=SA_JSON=/opt/edge-boot/secrets/key.json
 Environment=RUN_CONTAINER=0
 

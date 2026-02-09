@@ -18,33 +18,14 @@ API_KEY=token1
 MQTT_BROKER_HOST=ibce3b30.ala.eu-central-1.emqxsl.com
 MQTT_BROKER_PORT=8883
 
-MQTT_USER=edge-BA1-1
-MQTT_PASSWORD=edge-BA1-1
+MQTT_USER=edge-PL19-1
+MQTT_PASSWORD=edge-PL19-1
 
-group_id=consus-edge-lanz003-ba1-1
-consus_id=consus-edge-lanz003-ba1-1
-EDGE_HOSTNAME=consus-edge-lanz003-ba1-1
-EDGE_ID=consus-edge-lanz003-ba1-1
+group_id=consus-edge-lanz002-pl19-1
+consus_id=consus-edge-lanz002-pl19-1
+EDGE_HOSTNAME=consus-edge-lanz002-pl19-1
+EDGE_ID=consus-edge-lanz002-pl19-1
 UNIT_ID=1
-
-# === Link selection (how the Pi connects) ===
-# LINK_INTERNET: wifi | ethernet
-# LINK_INVERTER: ethernet | wifi  (Modbus path)
-
-LINK_INTERNET=wifi
-LINK_INVERTER=wifi
-ETH_IFACE=eth0
-
-# === Modbus (leave IP blank for discovery; port 502 default) ===
-MODBUS_TRANSPORT=tcp
-MODBUS_PORT=502
-MODBUS_IP=192.168.0.15
-
-NET_WATCHDOG_ENABLE=1
-NET_WD_FAILS_NEEDED=6
-NET_WD_INTERVAL_SECONDS=10
-NET_WD_COOLDOWN_SECONDS=3000
-
 
 KEEP_ALIVE=60
 
@@ -60,10 +41,31 @@ EDGE_IMAGE=europe-west2-docker.pkg.dev/consus-ems/consus-edge/edge-image:main
 # === Register map path (mounted read-only if present) ===
 REGISTER_MAP_PATH=/opt/edge-boot/register_map.json
 
+# === Link selection (how the Pi connects) ===
+# LINK_INTERNET: wifi | ethernet
+# LINK_INVERTER: ethernet | wifi  (Modbus path)
+
+LINK_INTERNET=wifi
+LINK_INVERTER=wifi
+ETH_IFACE=eth0
+
+
+
+
+# === Modbus (leave IP blank for discovery; port 502 default) ===
+MODBUS_TRANSPORT=tcp
+MODBUS_PORT=502
+MODBUS_IP=192.168.68.100
 
 # === Wi-Fi provisioning (set to 1 to let boot script create a Wi-Fi profile) ===
 WIFI_PROVISION_ENABLE=0
 WIFI_IFACE=wlan0
+
+NET_WATCHDOG_ENABLE=1
+NET_WD_FAILS_NEEDED=6
+NET_WD_INTERVAL_SECONDS=10
+NET_WD_COOLDOWN_SECONDS=300
+
 
 
 WIFI_SSID=__SITE_WIFI_SSID__

@@ -17,38 +17,6 @@ if [ "$(id -u)" -ne 0 ]; then
   id -nG 2>/dev/null | grep -q '\bdocker\b' || DOCKER="sudo docker"
 fi
 
-# ---------- Minimal disk cleanup (no extra files) ----------
-disk_guard() {
-  local free_mb
-  free_mb="$(df -Pm / | awk 'NR==2{print $4}')"
-  if [ "${free_mb:-0}" -ge 1024 ]; then
-    note "Disk OK (${free_mb}MB free on /)."
-    return 0
-  fi
-
-  note "Low disk (${free_mb}MB free on /). Clearing old logs + docker logs + prune…"
-
-  # 1) journald (fast win, safe)
-  if command -v journalctl >/dev/null 2>&1; then
-    sudo journalctl --vacuum-size=200M >/dev/null 2>&1 || true
-  fi
-
-  # 2) truncate big docker json logs (biggest win in practice)
-  if [ -d /var/lib/docker/containers ]; then
-    sudo find /var/lib/docker/containers -name '*-json.log' -type f -size +50M -print \
-      -exec sudo sh -c 'truncate -s 0 "$1"' _ {} \; >/dev/null 2>&1 || true
-  fi
-
-  # 3) delete rotated/compressed logs
-  sudo find /var/log -type f \( -name "*.gz" -o -name "*.[0-9]" -o -name "*.1" \) -delete >/dev/null 2>&1 || true
-
-  # 4) docker prune (best effort)
-  $DOCKER system prune -a -f --volumes >/dev/null 2>&1 || true
-
-  free_mb="$(df -Pm / | awk 'NR==2{print $4}')"
-  note "After cleanup: ${free_mb}MB free on /"
-}
-
 [ -f "$ENV_FILE" ] || err "Missing $ENV_FILE"
 set -a; . "$ENV_FILE"; set +a
 
@@ -59,29 +27,15 @@ MODBUS_PORT=502
 sudo mkdir -p /opt/edge-boot/data/spool /opt/edge-boot/secrets
 sudo chown -R "${SUDO_USER:-root}":"${SUDO_USER:-root}" /opt/edge-boot || true
 
-# ---------- Minimal Docker hardening (prevents SD fill-ups) ----------
-# 1) Ensure daemon.json is valid SINGLE JSON containing dns + log rotation
-# 2) Restart docker
+# DNS preference (helps avoid IPv6 hiccups)
 sudo mkdir -p /etc/docker
-DAEMON_JSON="/etc/docker/daemon.json"
-
-sudo tee "$DAEMON_JSON" >/dev/null <<'JSON'
-{
-  "dns": ["1.1.1.1", "8.8.8.8"],
-  "ipv6": false,
-  "log-driver": "json-file",
-  "log-opts": {
-    "max-size": "10m",
-    "max-file": "3"
-  }
-}
-JSON
-
-sudo systemctl enable --now docker
-sudo systemctl restart docker
-
-# ---- Minimal anti-disk-fill: cleanup only when low ----
-disk_guard
+if [ ! -f /etc/docker/daemon.json ] || ! grep -q '"dns"' /etc/docker/daemon.json 2>/dev/null; then
+  echo '{"dns":["1.1.1.1","8.8.8.8"],"ipv6":false}' | sudo tee /etc/docker/daemon.json >/dev/null
+  sudo systemctl enable --now docker
+  sudo systemctl restart docker
+else
+  sudo systemctl enable --now docker
+fi
 
 # ---------- Optional Wi-Fi provisioning ----------
 if [[ "${WIFI_PROVISION_ENABLE:-0}" == "1" ]]; then
@@ -216,8 +170,8 @@ discover_modbus_ip(){
 found_ip="$(discover_modbus_ip || true)"
 if [[ -n "$found_ip" ]]; then
   note "Detected inverter Modbus at ${found_ip}:502"
-  # Write back atomically to env.edge (avoid /tmp when disk is full)
-  tmp="$(dirname "$ENV_FILE")/.env.edge.tmp.$$"
+  # Write back atomically to env.edge
+  tmp=$(mktemp)
   awk -v kv="MODBUS_IP=${found_ip}" '
     BEGIN{done=0}
     /^MODBUS_IP=/ { if(!done){print kv; done=1; next} }
@@ -274,6 +228,53 @@ fi
 IMG="${EDGE_IMAGE:-europe-west2-docker.pkg.dev/consus-ems/consus-edge/edge-image:main}"
 note "Pulling image: $IMG"
 $DOCKER pull "$IMG" >/dev/null 2>&1 || note "Pull failed now; image may already exist."
+
+# ---------- Net watchdog launcher (execution lives here; logic in scripts/) ----------
+if [[ "${NET_WATCHDOG_ENABLE:-0}" == "1" ]]; then
+  WD_BIN="/opt/edge-boot/scripts/net_watchdog.sh"
+
+  if [[ -f "$WD_BIN" ]]; then
+  sudo chmod +x "$WD_BIN" 2>/dev/null || true
+  fi
+
+  if [[ ! -x "$WD_BIN" ]]; then
+    note "Net watchdog missing/not executable: $WD_BIN"
+  else
+    # If ethernet is up, do not allow wifi bouncing to interfere (optional but recommended)
+    # This only disables wifi if LINK_INTERNET is not wifi OR eth0 is actually up.
+    ETH_IF="${ETH_IFACE:-eth0}"
+    if [[ "${LINK_INTERNET:-wifi}" != "wifi" ]] || [[ "$(cat "/sys/class/net/${ETH_IF}/operstate" 2>/dev/null || echo down)" == "up" ]]; then
+      if command -v rfkill >/dev/null 2>&1; then
+        rfkill block wifi >/dev/null 2>&1 || true
+        note "Ethernet detected (or LINK_INTERNET!=wifi); Wi-Fi blocked to avoid route flaps"
+      fi
+    fi
+
+    # Start watchdog via transient systemd unit (no extra files), idempotent
+    if command -v systemd-run >/dev/null 2>&1; then
+      if systemctl is-active --quiet consus-net-watchdog.service 2>/dev/null; then
+        note "Net watchdog already running"
+      else
+        note "Starting net watchdog (transient unit)"
+        systemd-run \
+          --unit=consus-net-watchdog.service \
+          --description="Consus network watchdog" \
+          --property=Restart=always \
+          --property=RestartSec=5s \
+          --property=EnvironmentFile="$ENV_FILE" \
+          "$WD_BIN" >/dev/null 2>&1 || note "Failed to start net watchdog"
+      fi
+    else
+      # Fallback: background process
+      if pgrep -f "$WD_BIN" >/dev/null 2>&1; then
+        note "Net watchdog already running (pgrep)"
+      else
+        note "Starting net watchdog in background"
+        nohup "$WD_BIN" >/dev/null 2>&1 &
+      fi
+    fi
+  fi
+fi
 
 # ---------- Respect no-autostart ----------
 if [[ "$RUN_CONTAINER" != "1" ]]; then

@@ -4,8 +4,6 @@
   "word_order": "big",
   "registers": [
     { "name": "battery_soc",              "address": 37008, "space": "holding", "type": "u16", "scale": 1.0, "rw": "r" },
-    { "name": "battery_bms_voltage",      "address": 47907, "space": "holding", "type": "u16", "scale": 1.0, "rw": "r" },
-    { "name": "battery_bms_current",      "address": 47909, "space": "holding", "type": "u16", "scale": 1.0, "rw": "r" },
 
     { "name": "total_load_power",         "address": 35172, "space": "holding", "type": "s32", "scale": 1.0, "rw": "r" },
     { "name": "meter_total_active_power", "address": 36026, "space": "holding", "type": "s32", "scale": 1.0, "rw": "r" },
@@ -18,8 +16,15 @@
 
       { "name": "SOH",           "address": 37009, "space": "holding", "type": "u16", "scale": 1.0, "rw": "rw" },
 
+      { "name": "inverter_power",       "address": 35138, "space": "holding", "type": "s32", "scale": 1.0, "rw": "r" },
 
     { "name": "ems_power_mode",           "address": 47512, "space": "holding", "type": "u16", "scale": 1.0, "rw": "rw" },
-    { "name": "ems_power_set",            "address": 47513, "space": "holding", "type": "u16", "scale": 1.0, "rw": "w",  "write_only": true }
+    { "name": "ems_power_set",  "address": 47513, "space": "holding", "type": "u16", "scale": 1.0, "rw": "w",  "write_only": true }
+
+
+
+    
+
+
   ]
 }

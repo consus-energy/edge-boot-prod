@@ -18,13 +18,14 @@ API_KEY=token1
 MQTT_BROKER_HOST=ibce3b30.ala.eu-central-1.emqxsl.com
 MQTT_BROKER_PORT=8883
 
-MQTT_USER=edge-BA1-1
-MQTT_PASSWORD=edge-BA1-1
+MQTT_USER=edge-test-1
+MQTT_PASSWORD=edge-test-1
 
-group_id=consus-edge-lanz003-ba1-1
-consus_id=consus-edge-lanz003-ba1-1
-EDGE_HOSTNAME=consus-edge-lanz003-ba1-1
-EDGE_ID=consus-edge-lanz003-ba1-1
+group_id=LANZ-001
+consus_id=LANZ-001-BAT1
+
+EDGE_HOSTNAME=consus-edge-lanz001
+EDGE_ID=consus-edge-lanz001
 UNIT_ID=1
 
 # === Link selection (how the Pi connects) ===
@@ -38,7 +39,7 @@ ETH_IFACE=eth0
 # === Modbus (leave IP blank for discovery; port 502 default) ===
 MODBUS_TRANSPORT=tcp
 MODBUS_PORT=502
-MODBUS_IP=192.168.0.15
+MODBUS_IP=192.168.86.142
 
 NET_WATCHDOG_ENABLE=1
 NET_WD_FAILS_NEEDED=6
