@@ -31,8 +31,12 @@ EDGE_START_SH="${REPO_ROOT}/scripts/edge-start.sh"
 VERIFY_SH="${REPO_ROOT}/scripts/verify.sh"
 UNIT_FILE="${REPO_ROOT}/systemd/edge-boot.service"
 REGMAP="${REPO_ROOT}/env/register_map.json"
-NET_DOG="${REPO_ROOT}/scripts/net_watchdog.sh"
 NET_TEST="${REPO_ROOT}/scripts/net_test.sh"
+PORTAL_HTML="${REPO_ROOT}/portal/index.html"
+PORTAL_PY="${REPO_ROOT}/portal/wifi_portal.py"
+WIFI_SETUP_SH="${REPO_ROOT}/scripts/wifi_setup_portal.sh"
+PORTAL_LOGO_PNG="${REPO_ROOT}/portal/logo.png"
+
 
 # --- Fixed remote paths ---
 REMOTE_BOOT_DIR="/opt/edge-boot"
@@ -41,8 +45,8 @@ REMOTE_ENV="${REMOTE_ENV_DIR}/env.edge"
 REMOTE_KEY="${REMOTE_BOOT_DIR}/secrets/key.json"
 REMOTE_REGMAP="${REMOTE_BOOT_DIR}/register_map.json"
 REMOTE_UNIT="/etc/systemd/system/edge-boot.service"
-REMOTE_NET_DOG="${REMOTE_BOOT_DIR}/scripts/net_watchdog.sh"
 REMOTE_NET_TEST="${REMOTE_BOOT_DIR}/scripts/net_test.sh"
+
 
 err(){ echo "[deploy][ERROR] $*" >&2; exit 1; }
 note(){ echo "[deploy] $*"; }
@@ -54,8 +58,11 @@ note(){ echo "[deploy] $*"; }
 [[ -f "$EDGE_START_SH" ]] || err "Missing $EDGE_START_SH"
 [[ -f "$VERIFY_SH" ]] || err "Missing $VERIFY_SH"
 [[ -f "$UNIT_FILE" ]] || err "Missing $UNIT_FILE"
-[[ -f "$NET_DOG" ]] || err "Missing $NET_DOG"
 [[ -f "$NET_TEST" ]] || err "Missing $NET_TEST"
+[[ -f "$PORTAL_HTML" ]] || err "Missing $PORTAL_HTML"
+[[ -f "$PORTAL_PY" ]]   || err "Missing $PORTAL_PY"
+[[ -f "$WIFI_SETUP_SH" ]] || err "Missing $WIFI_SETUP_SH"
+
 
 note "Preparing remote directories…"
 ssh ${SSH_OPTS} "${TARGET}" "\
@@ -66,6 +73,8 @@ ssh ${SSH_OPTS} "${TARGET}" "\
     ${REMOTE_BOOT_DIR}/tools \
     ${REMOTE_BOOT_DIR}/wifi \
     ${REMOTE_BOOT_DIR}/scripts \
+    ${REMOTE_BOOT_DIR}/portal \
+
   && sudo chown -R \$USER:\$USER ${REMOTE_BOOT_DIR}
 "
 
@@ -84,9 +93,13 @@ stage_push "$KEY_JSON"      "$REMOTE_KEY"   "0600"
 stage_push "$BOOT_SH"       "${REMOTE_BOOT_DIR}/boot-min.sh" "0755"
 stage_push "$EDGE_START_SH" "${REMOTE_BOOT_DIR}/edge-start.sh" "0755"
 stage_push "$VERIFY_SH"     "${REMOTE_BOOT_DIR}/verify.sh" "0755"
-stage_push "$NET_DOG"       "$REMOTE_NET_DOG" "0755"
 stage_push "$NET_TEST"      "$REMOTE_NET_TEST" "0755"
 stage_push "$UNIT_FILE"     "$REMOTE_UNIT"  "0644"
+stage_push "$WIFI_SETUP_SH" "${REMOTE_BOOT_DIR}/scripts/wifi_setup_portal.sh" "0755"
+stage_push "$PORTAL_PY"     "${REMOTE_BOOT_DIR}/portal/wifi_portal.py"       "0755"
+stage_push "$PORTAL_HTML"   "${REMOTE_BOOT_DIR}/portal/index.html"           "0644"
+
+[[ -f "$PORTAL_LOGO_PNG" ]] && stage_push "$PORTAL_LOGO_PNG" "${REMOTE_BOOT_DIR}/portal/logo.png" "0644" || true
 [[ -f "$REGMAP" ]] && stage_push "$REGMAP" "$REMOTE_REGMAP" "0644" || true
 
 note "Reloading systemd & enabling provisioning oneshot…"

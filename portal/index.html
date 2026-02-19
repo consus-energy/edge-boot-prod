@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Consus Edge Setup</title>
+
+  <style>
+    :root{
+      --bg: #06062F;
+      --accent: #FF4D00;
+      --accent-soft: rgba(255,77,0,0.14);
+      --text: #F4F5FF;
+      --muted: rgba(244,245,255,0.65);
+      --card: rgba(255,255,255,0.04);
+      --border: rgba(255,255,255,0.12);
+      --focus: rgba(255,77,0,0.35);
+      --ok: #2dd4bf;
+      --warn: #fbbf24;
+      --err: #fb7185;
+    }
+
+    *{ box-sizing: border-box; }
+
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      background: radial-gradient(1000px 700px at 90% -10%, rgba(255,77,0,0.15), transparent 55%), var(--bg);
+      color: var(--text);
+      min-height:100vh;
+      display:flex;
+      justify-content:center;
+      align-items:flex-start;
+      padding: clamp(20px, 5vh, 70px) 32px 32px 32px;
+    }
+
+    .wrap{ width:100%; max-width: 560px; }
+
+    .brand{
+      text-align:center;
+      margin-bottom: 18px;
+    }
+
+    .brand img{
+      max-width: 400px;
+      margin-bottom: 10px;
+      height: auto;
+    }
+
+    .brand h1{
+      margin:0;
+      font-size: 16px;
+      letter-spacing: 0.4px;
+      font-weight: 600;
+      color: rgba(244,245,255,0.90);
+    }
+
+    .card{
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 22px;
+      backdrop-filter: blur(12px);
+    }
+
+    h2{ margin: 0 0 8px 0; font-size: 20px; }
+
+    .subtitle{
+      margin: 0 0 14px 0;
+      font-size: 14px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .statusbar{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 10px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: rgba(0,0,0,0.18);
+      margin-bottom: 14px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .pill{
+      display:inline-flex;
+      align-items:center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(0,0,0,0.22);
+      color: rgba(244,245,255,0.85);
+      font-weight: 600;
+      font-size: 12.5px;
+      white-space: nowrap;
+    }
+
+    .dot{
+      width: 8px;
+      height: 8px;
+      border-radius: 99px;
+      background: rgba(255,255,255,0.25);
+    }
+    .pill.ok .dot{ background: var(--ok); }
+    .pill.warn .dot{ background: var(--warn); }
+    .pill.err .dot{ background: var(--err); }
+
+    label{
+      display:block;
+      font-size: 13px;
+      color: var(--muted);
+      margin-top: 14px;
+      margin-bottom: 6px;
+    }
+
+    select, input{
+      width:100%;
+      padding: 12px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: rgba(0,0,0,0.25);
+      color: var(--text);
+      font-size: 16px;
+      outline:none;
+    }
+
+    select:focus, input:focus{
+      border-color: var(--accent);
+      box-shadow: 0 0 0 4px var(--focus);
+    }
+
+    .row{
+      display:flex;
+      gap: 12px;
+      align-items:center;
+      margin-top: 10px;
+    }
+
+    .toggle{
+      display:flex;
+      align-items:center;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 13px;
+      user-select: none;
+    }
+    .toggle input{ width: 18px; height: 18px; }
+
+    button{
+      margin-top: 18px;
+      width:100%;
+      padding: 13px;
+      border-radius: 12px;
+      border:none;
+      background: var(--accent);
+      color: white;
+      font-size: 16px;
+      font-weight: 700;
+      cursor:pointer;
+      transition: 0.15s ease;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      gap: 10px;
+    }
+
+    button:hover{ opacity:0.95; transform: translateY(-1px); }
+    button:disabled{ opacity:0.65; cursor:not-allowed; transform:none; }
+
+    .spinner{
+      width: 16px;
+      height: 16px;
+      border-radius: 99px;
+      border: 2px solid rgba(255,255,255,0.35);
+      border-top-color: rgba(255,255,255,0.95);
+      animation: spin 0.8s linear infinite;
+      display:none;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .msg{
+      margin-top: 14px;
+      padding: 12px;
+      border-radius: 12px;
+      font-size: 13.5px;
+      border: 1px solid var(--border);
+      background: rgba(0,0,0,0.18);
+      color: rgba(244,245,255,0.90);
+    }
+    .msg.ok{ border-color: rgba(45,212,191,0.50); background: rgba(45,212,191,0.12); }
+    .msg.warn{ border-color: rgba(251,191,36,0.55); background: rgba(251,191,36,0.10); }
+    .msg.err{ border-color: rgba(251,113,133,0.55); background: rgba(251,113,133,0.10); }
+
+    .fine{
+      margin-top: 14px;
+      font-size: 12.5px;
+      color: var(--muted);
+      line-height: 1.4;
+      text-align:center;
+    }
+
+    @media (max-width:480px){
+      body{ padding: 18px; }
+      .card{ padding: 18px; }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+
+    <div class="brand">
+      <img src="logo.png" alt="Consus" />
+      <h1>Consus Edge Controller</h1>
+    </div>
+
+    <div class="card">
+      <h2>Connect to Site Wi-Fi</h2>
+      <p class="subtitle">
+        Select the building’s Wi-Fi network and enter the password. Once connected, this setup network will close automatically. You must connect to the same network your battery system is connected to.
+      </p>
+
+      <div class="statusbar">
+        <div id="statusText">Checking connection…</div>
+        <div id="statusPill" class="pill warn"><span class="dot"></span><span id="statusPillText">Loading</span></div>
+      </div>
+
+      <form id="wifiForm" method="POST" action="/connect">
+        <label for="ssid">Wi-Fi Network</label>
+        <select id="ssid" name="ssid">
+          {{SSID_OPTIONS}}
+        </select>
+
+        <label for="pass">Password</label>
+        <input id="pass" name="pass" type="password" placeholder="Enter Wi-Fi password" />
+
+        <div class="row">
+          <label class="toggle">
+            <input id="showPass" type="checkbox" />
+            Show password
+          </label>
+        </div>
+
+        <button id="connectBtn" type="submit">
+          <span class="spinner" id="spinner"></span>
+          <span id="btnText">Connect</span>
+        </button>
+      </form>
+
+      {{MESSAGE_HTML}}
+
+      <div class="fine">
+        If this page does not open automatically, open the setup address shown by your device.
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    const passEl = document.getElementById("pass");
+    const showPassEl = document.getElementById("showPass");
+    const formEl = document.getElementById("wifiForm");
+    const btnEl = document.getElementById("connectBtn");
+    const spinnerEl = document.getElementById("spinner");
+    const btnTextEl = document.getElementById("btnText");
+
+    const statusText = document.getElementById("statusText");
+    const statusPill = document.getElementById("statusPill");
+    const statusPillText = document.getElementById("statusPillText");
+
+    showPassEl.addEventListener("change", () => {
+      passEl.type = showPassEl.checked ? "text" : "password";
+    });
+
+    formEl.addEventListener("submit", () => {
+      // Show loading state immediately on submit
+      btnEl.disabled = true;
+      spinnerEl.style.display = "inline-block";
+      btnTextEl.textContent = "Connecting…";
+    });
+
+    function setPill(state, text){
+      statusPill.classList.remove("ok","warn","err");
+      statusPill.classList.add(state);
+      statusPillText.textContent = text;
+    }
+
+    async function pollStatus(){
+      try{
+        const r = await fetch("/status", { cache: "no-store" });
+        const s = await r.json();
+
+        if (s.internet){
+          statusText.textContent = "Connected to Wi-Fi and internet is available.";
+          setPill("ok", "Online");
+          return;
+        }
+
+        if (s.wifi_connected && s.has_ipv4){
+          statusText.textContent = "Connected to Wi-Fi, but internet is not detected yet.";
+          setPill("warn", "Wi-Fi only");
+          return;
+        }
+
+        if (s.wifi_connected){
+          statusText.textContent = "Attempting to connect to Wi-Fi…";
+          setPill("warn", "Connecting");
+          return;
+        }
+
+        statusText.textContent = "Not connected to site Wi-Fi yet. Use the form below.";
+        setPill("err", "Not connected");
+      } catch(e){
+        statusText.textContent = "Status unavailable. You can still try connecting.";
+        setPill("warn", "Unknown");
+      }
+    }
+
+    pollStatus();
+    setInterval(pollStatus, 2000);
+  </script>
+</body>
+</html>

@@ -17,7 +17,36 @@ if [ "$(id -u)" -ne 0 ]; then
   id -nG 2>/dev/null | grep -q '\bdocker\b' || DOCKER="sudo docker"
 fi
 
-# ---------- Minimal disk cleanup (no extra files) ----------
+# ---------- Health guard (RAM + swap) ----------
+health_guard() {
+  local min_mem_mb="${MIN_MEM_MB:-200}"
+  local max_swap_used_pct="${MAX_SWAP_USED_PCT:-50}"
+
+  local mem_avail_kb mem_avail_mb
+  mem_avail_kb="$(awk '/MemAvailable:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
+  mem_avail_mb="$(( mem_avail_kb / 1024 ))"
+
+  local swap_total_kb swap_free_kb swap_used_pct
+  swap_total_kb="$(awk '/SwapTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
+  swap_free_kb="$(awk '/SwapFree:/  {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
+  if [ "${swap_total_kb:-0}" -gt 0 ]; then
+    swap_used_pct="$(( ( (swap_total_kb - swap_free_kb) * 100 ) / swap_total_kb ))"
+  else
+    swap_used_pct=0
+  fi
+
+  if [ "${mem_avail_mb:-0}" -lt "$min_mem_mb" ]; then
+    note "Low RAM: MemAvailable=${mem_avail_mb}MB (<${min_mem_mb}MB). Dropping caches (best effort)."
+    sudo sync >/dev/null 2>&1 || true
+    echo 3 | sudo tee /proc/sys/vm/drop_caches >/dev/null 2>&1 || true
+  fi
+
+  if [ "${swap_used_pct:-0}" -ge "$max_swap_used_pct" ]; then
+    note "High swap usage: ${swap_used_pct}% (>=${max_swap_used_pct}%)."
+  fi
+}
+
+# ---------- Minimal disk cleanup (only when low) ----------
 disk_guard() {
   local free_mb
   free_mb="$(df -Pm / | awk 'NR==2{print $4}')"
@@ -28,25 +57,77 @@ disk_guard() {
 
   note "Low disk (${free_mb}MB free on /). Clearing old logs + docker logs + prune…"
 
-  # 1) journald (fast win, safe)
+  # journald (size cap)
   if command -v journalctl >/dev/null 2>&1; then
     sudo journalctl --vacuum-size=200M >/dev/null 2>&1 || true
   fi
 
-  # 2) truncate big docker json logs (biggest win in practice)
+  # truncate big docker json logs
   if [ -d /var/lib/docker/containers ]; then
     sudo find /var/lib/docker/containers -name '*-json.log' -type f -size +50M -print \
       -exec sudo sh -c 'truncate -s 0 "$1"' _ {} \; >/dev/null 2>&1 || true
   fi
 
-  # 3) delete rotated/compressed logs
+  # delete rotated/compressed logs
   sudo find /var/log -type f \( -name "*.gz" -o -name "*.[0-9]" -o -name "*.1" \) -delete >/dev/null 2>&1 || true
 
-  # 4) docker prune (best effort)
+  # docker prune
   $DOCKER system prune -a -f --volumes >/dev/null 2>&1 || true
 
   free_mb="$(df -Pm / | awk 'NR==2{print $4}')"
   note "After cleanup: ${free_mb}MB free on /"
+}
+
+# ---------- Periodic guard timer (repo-managed) ----------
+install_guard_timer() {
+  local edge_start="/opt/edge-boot/scripts/edge-start.sh"
+
+  if [ ! -x "$edge_start" ]; then
+    note "Guard timer skipped: missing executable ${edge_start}"
+    return 0
+  fi
+
+  sudo tee /etc/systemd/system/consus-guard.service >/dev/null <<EOF
+[Unit]
+Description=Consus Edge guard (disk+health)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=${edge_start} --guard-once
+EOF
+
+  sudo tee /etc/systemd/system/consus-guard.timer >/dev/null <<'EOF'
+[Unit]
+Description=Run Consus Edge guard periodically
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+  sudo systemctl daemon-reload >/dev/null 2>&1 || true
+  sudo systemctl enable --now consus-guard.timer >/dev/null 2>&1 || true
+  note "Guard timer installed/enabled (15 min)."
+}
+
+# ---------- Enforce 3-day journal retention (strict) ----------
+enforce_journald_retention() {
+  local conf="/etc/systemd/journald.conf"
+  sudo touch "$conf" || true
+  sudo sed -i \
+    -e 's/^[#[:space:]]*SystemMaxUse=.*/SystemMaxUse=200M/' \
+    -e 's/^[#[:space:]]*SystemMaxFileSize=.*/SystemMaxFileSize=20M/' \
+    -e 's/^[#[:space:]]*MaxRetentionSec=.*/MaxRetentionSec=3day/' \
+    "$conf" 2>/dev/null || true
+  grep -q '^[#[:space:]]*MaxRetentionSec=' "$conf" || echo 'MaxRetentionSec=3day' | sudo tee -a "$conf" >/dev/null
+  sudo systemctl restart systemd-journald >/dev/null 2>&1 || true
+  sudo journalctl --vacuum-time=3d >/dev/null 2>&1 || true
 }
 
 [ -f "$ENV_FILE" ] || err "Missing $ENV_FILE"
@@ -60,8 +141,6 @@ sudo mkdir -p /opt/edge-boot/data/spool /opt/edge-boot/secrets
 sudo chown -R "${SUDO_USER:-root}":"${SUDO_USER:-root}" /opt/edge-boot || true
 
 # ---------- Minimal Docker hardening (prevents SD fill-ups) ----------
-# 1) Ensure daemon.json is valid SINGLE JSON containing dns + log rotation
-# 2) Restart docker
 sudo mkdir -p /etc/docker
 DAEMON_JSON="/etc/docker/daemon.json"
 
@@ -80,8 +159,13 @@ JSON
 sudo systemctl enable --now docker
 sudo systemctl restart docker
 
-# ---- Minimal anti-disk-fill: cleanup only when low ----
+# ---------- Log retention + periodic guard ----------
+enforce_journald_retention
+install_guard_timer
+
+# ---- Minimal anti-disk-fill + health check (run once now) ----
 disk_guard
+health_guard
 
 # ---------- Optional Wi-Fi provisioning ----------
 if [[ "${WIFI_PROVISION_ENABLE:-0}" == "1" ]]; then
@@ -112,6 +196,21 @@ if [[ "${WIFI_PROVISION_ENABLE:-0}" == "1" ]]; then
   fi
 fi
 
+# ---------- Client Wi-Fi setup portal (only when needed) ----------
+if [[ "${WIFI_SETUP_ENABLE:-0}" == "1" ]]; then
+  if command -v nmcli >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
+    note "Wi-Fi setup portal enabled; checking connectivity…"
+    if ! curl -fsS -m 3 https://clients3.google.com/generate_204 >/dev/null 2>&1; then
+      note "No internet detected; starting Wi-Fi setup portal…"
+      /opt/edge-boot/scripts/wifi_setup_portal.sh || note "Wi-Fi setup portal exited with failure or timeout."
+    else
+      note "Internet OK; skipping Wi-Fi setup portal."
+    fi
+  else
+    note "Wi-Fi setup portal enabled but nmcli/python3 missing; skipping."
+  fi
+fi
+
 # ---------- Inverter link (eth0 / or wlan if LINK_INVERTER=wifi) ----------
 discover_modbus_ip(){
   local port="502"  # fixed
@@ -123,7 +222,6 @@ discover_modbus_ip(){
   local fallback_pi_ip="${EDGE_ETH_STATIC_IP:-192.168.86.10}"
   local fallback_prefix="${EDGE_ETH_PREFIX:-24}"
 
-  # Pick interface by link type
   if [[ "$link" == "wifi" ]]; then
     iface="${WIFI_IFACE:-wlan0}"
   else
@@ -131,7 +229,6 @@ discover_modbus_ip(){
   fi
   note "Discovery: link=${link}, iface=${iface}"
 
-  # Prefer env value if already reachable
   if [[ -n "${MODBUS_IP:-}" ]]; then
     note "Discovery: trying MODBUS_IP from env (${MODBUS_IP}) on port ${port}"
     if nc -z -w1 "$MODBUS_IP" "$port" >/dev/null 2>&1; then
@@ -145,7 +242,6 @@ discover_modbus_ip(){
     note "Discovery: no MODBUS_IP in env; proceeding to scan"
   fi
 
-  # Ensure iface up / address present
   if [[ "$link" == "ethernet" ]]; then
     if command -v nmcli >/dev/null 2>&1; then
       nmcli dev set "$iface" managed yes || true
@@ -170,12 +266,10 @@ discover_modbus_ip(){
       cidr="${fallback_pi_ip}/${fallback_prefix}"
     fi
   else
-    # wifi link: just read existing cidr
     cidr="$(ip -4 addr show dev "$iface" | awk '/inet /{print $2; exit}')"
   fi
   [[ -n "$cidr" ]] && note "Discovery: using CIDR ${cidr}" || note "Discovery: no IPv4 CIDR on ${iface}"
 
-  # Probe only what's configured; no hardcoded fallback
   for guess in "${MODBUS_IP:-}"; do
     [[ -n "$guess" ]] || continue
     note "Discovery: probing configured guess ${guess}:${port}"
@@ -185,7 +279,6 @@ discover_modbus_ip(){
     fi
   done
 
-  # ARP neighbors (fast)
   if [[ -z "$ip" ]]; then
     note "Discovery: probing ARP neighbours on ${iface} for Modbus ${port}…"
     ip neigh show dev "$iface" | awk '{print $1}' | while read -r host; do
@@ -194,7 +287,6 @@ discover_modbus_ip(){
     [[ -n "$ip" ]] && note "Discovery: ARP hit ${ip}"
   fi
 
-  # Subnet sweep
   if [[ -z "$ip" && -n "$cidr" ]]; then
     local base A B C host
     base="${cidr%/*}"
@@ -216,7 +308,6 @@ discover_modbus_ip(){
 found_ip="$(discover_modbus_ip || true)"
 if [[ -n "$found_ip" ]]; then
   note "Detected inverter Modbus at ${found_ip}:502"
-  # Write back atomically to env.edge (avoid /tmp when disk is full)
   tmp="$(dirname "$ENV_FILE")/.env.edge.tmp.$$"
   awk -v kv="MODBUS_IP=${found_ip}" '
     BEGIN{done=0}
@@ -225,7 +316,6 @@ if [[ -n "$found_ip" ]]; then
     END{ if(!done) print kv }
   ' "$ENV_FILE" > "$tmp" && sudo install -m 0644 "$tmp" "$ENV_FILE" && rm -f "$tmp"
 
-  # ---------- Report MODBUS target to BatteryRegistry ----------
   TARGET_ID="${consus_id:-${group_id:-}}"
   if [[ -n "${TARGET_ID}" && -n "${api_base_url:-}" && -n "${API_KEY:-}" ]]; then
     PATCH_URL="${api_base_url%/}/batteries/${TARGET_ID}"
@@ -239,7 +329,6 @@ EOF
     _JSON="${_JSON/__FOUND_IP__/${found_ip}}"
     note "PATCH ${PATCH_URL} with MODBUS_IP=${found_ip}, MODBUS_PORT=502"
 
-    # Safe curl under set -e
     set +e
     code="$(curl -sS -m 10 -o /dev/null -w '%{http_code}' \
              -X PATCH "${PATCH_URL}" \

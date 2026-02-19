@@ -93,7 +93,6 @@ LOG_TO_STDOUT=1
 
 
 # === Wi-Fi setup (AP mode) ===
-# DOESNT WORK FOR ETH 
 
 WIFI_SETUP_ENABLE=1
 WIFI_SETUP_PASS=consus-energy-2000

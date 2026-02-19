@@ -7,14 +7,12 @@ err(){ echo "[start][ERROR] $*" >&2; exit 1; }
 ENV_FILE="${ENV_FILE:-/opt/edge-boot/env/env.edge}"
 SERVICE_NAME="${SERVICE_NAME:-consus-edge}"
 
-# Docker command (no $USER under systemd)
 DOCKER="docker"
 command -v docker >/dev/null 2>&1 || DOCKER="sudo docker"
 if [ "$(id -u)" -ne 0 ]; then
   id -nG 2>/dev/null | grep -q '\bdocker\b' || DOCKER="sudo docker"
 fi
 
-# ---------- Minimal disk cleanup (no extra files) ----------
 disk_guard() {
   local free_mb
   free_mb="$(df -Pm / | awk 'NR==2{print $4}')"
@@ -25,29 +23,61 @@ disk_guard() {
 
   note "Low disk (${free_mb}MB free on /). Clearing old logs + docker logs + prune…"
 
-  # 1) journald (fast win, safe)
   if command -v journalctl >/dev/null 2>&1; then
+    sudo journalctl --vacuum-time=3d >/dev/null 2>&1 || true
     sudo journalctl --vacuum-size=200M >/dev/null 2>&1 || true
   fi
 
-  # 2) truncate big docker json logs (biggest win in practice)
   if [ -d /var/lib/docker/containers ]; then
     sudo find /var/lib/docker/containers -name '*-json.log' -type f -size +50M -print \
       -exec sudo sh -c 'truncate -s 0 "$1"' _ {} \; >/dev/null 2>&1 || true
   fi
 
-  # 3) delete rotated/compressed logs
   sudo find /var/log -type f \( -name "*.gz" -o -name "*.[0-9]" -o -name "*.1" \) -delete >/dev/null 2>&1 || true
 
-  # 4) docker prune (best effort)
   $DOCKER system prune -a -f --volumes >/dev/null 2>&1 || true
 
   free_mb="$(df -Pm / | awk 'NR==2{print $4}')"
   note "After cleanup: ${free_mb}MB free on /"
 }
 
+health_guard() {
+  local min_mem_mb="${MIN_MEM_MB:-200}"
+  local max_swap_used_pct="${MAX_SWAP_USED_PCT:-50}"
+
+  local mem_avail_kb mem_avail_mb
+  mem_avail_kb="$(awk '/MemAvailable:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
+  mem_avail_mb="$(( mem_avail_kb / 1024 ))"
+
+  local swap_total_kb swap_free_kb swap_used_pct
+  swap_total_kb="$(awk '/SwapTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
+  swap_free_kb="$(awk '/SwapFree:/  {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
+  if [ "${swap_total_kb:-0}" -gt 0 ]; then
+    swap_used_pct="$(( ( (swap_total_kb - swap_free_kb) * 100 ) / swap_total_kb ))"
+  else
+    swap_used_pct=0
+  fi
+
+  if [ "${mem_avail_mb:-0}" -lt "$min_mem_mb" ]; then
+    note "Low RAM: MemAvailable=${mem_avail_mb}MB (<${min_mem_mb}MB). Dropping caches (best effort)."
+    sudo sync >/dev/null 2>&1 || true
+    echo 3 | sudo tee /proc/sys/vm/drop_caches >/dev/null 2>&1 || true
+  fi
+
+  if [ "${swap_used_pct:-0}" -ge "$max_swap_used_pct" ]; then
+    note "High swap usage: ${swap_used_pct}% (>=${max_swap_used_pct}%)."
+  fi
+}
+
 [ -f "$ENV_FILE" ] || err "Missing $ENV_FILE"
 set -a; . "$ENV_FILE"; set +a
+
+# --- guard-only mode: used by systemd timer ---
+if [[ "${1:-}" == "--guard-once" ]]; then
+  disk_guard || true
+  health_guard || true
+  exit 0
+fi
 
 IMG="${EDGE_IMAGE:-europe-west2-docker.pkg.dev/consus-ems/consus-edge/edge-image:main}"
 
@@ -58,16 +88,12 @@ fi
 
 note "Launching ${SERVICE_NAME} from ${IMG}"
 
-# ---- Minimal anti-disk-fill: cleanup only when low ----
 disk_guard
+health_guard
 
-# Pull (best effort)
 $DOCKER pull "$IMG" || note "WARNING: pull failed, using cached image"
-
-# Replace container
 $DOCKER rm -f "$SERVICE_NAME" >/dev/null 2>&1 || true
 
-# Container-level log rotation (works even if daemon.json is wrong)
 $DOCKER run -d \
   --name "$SERVICE_NAME" \
   --restart unless-stopped \

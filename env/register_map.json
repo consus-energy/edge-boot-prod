@@ -19,7 +19,17 @@
       { "name": "inverter_power",       "address": 35138, "space": "holding", "type": "s32", "scale": 1.0, "rw": "r" },
 
     { "name": "ems_power_mode",           "address": 47512, "space": "holding", "type": "u16", "scale": 1.0, "rw": "rw" },
-    { "name": "ems_power_set",  "address": 47513, "space": "holding", "type": "u16", "scale": 1.0, "rw": "w",  "write_only": true }
+    { "name": "ems_power_set",  "address": 47513, "space": "holding", "type": "u16", "scale": 1.0, "rw": "w",  "write_only": true },
+
+    { "name": "pv1_power", "address": 35106, "space": "holding", "type": "u32", "scale": 1.0, "rw": "r" },
+    { "name": "pv2_power", "address": 35110, "space": "holding", "type": "u32", "scale": 1.0, "rw": "r" },
+    { "name": "pv3_power", "address": 35114, "space": "holding", "type": "u32", "scale": 1.0, "rw": "r" },
+    { "name": "pv4_power", "address": 35118, "space": "holding", "type": "u32", "scale": 1.0, "rw": "r" },
+
+    { "name": "pv_total_power", "address": 35302, "space": "holding", "type": "u32", "scale": 1.0, "rw": "r" },
+
+    { "name": "ct2_active_power", "address": 36046, "space": "holding", "type": "s32", "scale": 1.0, "rw": "r" }
+
 
 
 
